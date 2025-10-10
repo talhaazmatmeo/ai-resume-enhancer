@@ -1,0 +1,7 @@
+streamlit>=1.25
+pdfplumber
+python-docx
+spacy
+rapidfuzz
+requests
+reportlab
