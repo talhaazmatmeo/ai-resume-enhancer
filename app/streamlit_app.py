@@ -7,27 +7,36 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import streamlit as st
 
+import os
+
+AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+AZURE_FOUNDRY_KEY = os.getenv("AZURE_FOUNDRY_KEY")
+AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
+PDFSHIFT_API_KEY = os.getenv("PDFSHIFT_API_KEY")
+
+
+
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-# project modules
+# Project modules
 from src import parser, extractor, ats_score, gpt_client
+from src.pdf_exporter import generate_resume_pdf
 
 # -------------------------------
-# Utility: Convert text → PDF bytes
+# Utility: Convert text → PDF bytes (fallback)
 # -------------------------------
 def text_to_pdf_bytes(text: str) -> bytes:
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
 
-    # Set up page formatting
     p.setFont("Helvetica", 11)
     margin = 50
     y = height - margin
 
     for line in text.splitlines():
-        if y < 60:  # new page
+        if y < 60:
             p.showPage()
             p.setFont("Helvetica", 11)
             y = height - margin
@@ -50,7 +59,7 @@ st.markdown("""
 Upload your resume (PDF/DOCX), paste a job description, and get:
 - ✅ Smart ATS score  
 - ✍️ AI-enhanced resume content  
-- 📄 Download as TXT or PDF  
+- 📄 Download as TXT or beautifully formatted PDF  
 """)
 
 # Sidebar
@@ -124,19 +133,28 @@ if st.session_state.get("enhanced_text"):
     col1.text_area("Original", st.session_state["parsed"].get("text", "")[:600], height=300)
     col2.text_area("Enhanced", st.session_state["enhanced_text"][:600], height=300)
 
+    # -------------------------
     # Downloads
+    # -------------------------
     enhanced_text = st.session_state["enhanced_text"]
-    txt_data = enhanced_text.encode("utf-8")
-    pdf_data = text_to_pdf_bytes(enhanced_text)
 
+    # TXT version
+    txt_data = enhanced_text.encode("utf-8")
     st.download_button(
         "⬇️ Download Enhanced (TXT)",
         data=txt_data,
         file_name="enhanced_resume.txt",
         mime="text/plain"
     )
+
+    # Styled PDF version
+    try:
+        pdf_data = generate_resume_pdf(enhanced_text)
+    except Exception:
+        pdf_data = text_to_pdf_bytes(enhanced_text)
+
     st.download_button(
-        "⬇️ Download Enhanced (PDF)",
+        "📄 Download Enhanced (PDF)",
         data=pdf_data,
         file_name="enhanced_resume.pdf",
         mime="application/pdf"

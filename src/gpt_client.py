@@ -1,4 +1,3 @@
-# src/gpt_client.py
 """
 Azure Foundry / Azure OpenAI REST wrapper for impactful resume rewrites.
 Reads configuration from Streamlit secrets or environment variables:
@@ -18,9 +17,8 @@ DEBUG = bool(os.getenv("GPT_CLIENT_DEBUG", ""))
 
 
 # -------------------------
-# Configuration
+# Configuration Loader
 # -------------------------
-
 def _get_config():
     """Load Azure config from Streamlit secrets or environment."""
     endpoint = key = deployment = None
@@ -33,105 +31,101 @@ def _get_config():
     except Exception:
         pass
 
-    endpoint = endpoint or os.getenv("AZURE_FOUNDRY_ENDPOINT") or os.getenv("AZURE_ENDPOINT")
-    key = key or os.getenv("AZURE_FOUNDRY_KEY") or os.getenv("AZURE_KEY")
-    deployment = deployment or os.getenv("AZURE_DEPLOYMENT_NAME") or os.getenv("AZURE_DEPLOYMENT")
+    endpoint = endpoint or os.getenv("AZURE_FOUNDRY_ENDPOINT")
+    key = key or os.getenv("AZURE_FOUNDRY_KEY")
+    deployment = deployment or os.getenv("AZURE_DEPLOYMENT_NAME")
 
-    if endpoint:
-        endpoint = endpoint.rstrip("/")
+    if not (endpoint and key and deployment):
+        raise RuntimeError(
+            "❌ Azure configuration missing. Please check Streamlit secrets or environment variables."
+        )
 
-    return {"endpoint": endpoint, "key": key, "deployment": deployment}
+    return {"endpoint": endpoint.rstrip("/"), "key": key, "deployment": deployment}
 
 
+# -------------------------
+# Helper: Build Azure URL
+# -------------------------
 def _build_url(endpoint: str, deployment: str, api_version: str = API_VERSION) -> str:
-    """Builds REST URL for Azure Chat Completions."""
     return f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
 
 
 # -------------------------
-# REST Call Helper
+# Helper: API Request with Retry
 # -------------------------
-
-def _do_request(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _do_request(payload: Dict[str, Any], retries: int = 3) -> Dict[str, Any]:
     cfg = _get_config()
     endpoint, key, deployment = cfg["endpoint"], cfg["key"], cfg["deployment"]
-
-    if not (endpoint and key and deployment):
-        raise RuntimeError("Azure Foundry configuration missing.")
 
     url = _build_url(endpoint, deployment)
     headers = {"Content-Type": "application/json", "api-key": key}
 
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if DEBUG:
-        print("HTTP STATUS:", resp.status_code)
-        print("RAW RESPONSE:", resp.text)
-
-    if resp.status_code != 200:
+    for attempt in range(retries):
         try:
-            body = resp.json()
-        except Exception:
-            body = resp.text
-        raise RuntimeError(f"Request failed ({resp.status_code}): {body}")
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            if DEBUG:
+                print(f"[DEBUG] Azure call status {resp.status_code}")
 
-    return resp.json()
+            if resp.status_code == 200:
+                return resp.json()
+
+            # Handle rate limit or temporary errors
+            if resp.status_code in (429, 500, 502, 503):
+                wait_time = (attempt + 1) * 2
+                print(f"⚠️ Retry {attempt+1}/{retries} after {wait_time}s: {resp.status_code}")
+                time.sleep(wait_time)
+                continue
+
+            try:
+                body = resp.json()
+            except Exception:
+                body = resp.text
+
+            raise RuntimeError(f"❌ Request failed ({resp.status_code}): {body}")
+
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Network error ({attempt+1}/{retries}): {e}")
+            time.sleep((attempt + 1) * 2)
+
+    raise RuntimeError("❌ Azure GPT service unreachable after multiple retries.")
 
 
 # -------------------------
-# GPT Helper Functions
+# Core: Chat Completion
 # -------------------------
-
-def chat_completion(messages: List[Dict[str, str]],
-                    max_tokens: int = 400,
-                    temperature: float = 0.6) -> str:
-    """Calls Azure OpenAI and returns first assistant reply."""
-    payload = {
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-    }
-
+def chat_completion(messages: List[Dict[str, str]], max_tokens: int = 400, temperature: float = 0.6) -> str:
+    payload = {"messages": messages, "max_tokens": max_tokens, "temperature": temperature}
     result = _do_request(payload)
+
     try:
-        choices = result.get("choices") or []
+        choices = result.get("choices", [])
         if choices:
-            first = choices[0]
-            if "message" in first and isinstance(first["message"], dict):
-                return first["message"].get("content", "").strip()
-            if "text" in first:
-                return first["text"].strip()
+            msg = choices[0].get("message", {}).get("content", "").strip()
+            return msg or json.dumps(result)
         return json.dumps(result)
     except Exception:
         return json.dumps(result)
 
 
 # -------------------------
-# Resume Rewrite Logic
+# Business Logic: Resume Enhancement
 # -------------------------
-
 def enhance_resume_text(resume_text: str, job_keywords: Optional[List[str]] = None) -> str:
-    """
-    Stronger enhancement: fully rewrites resume text for clarity,
-    action verbs, and ATS keyword optimization.
-    """
+    """Enhances resume text for clarity, grammar, and ATS keyword optimization."""
     keywords = ", ".join(job_keywords) if job_keywords else "general professional skills"
+
     system_prompt = (
-        "You are an expert resume writer with 10+ years of experience optimizing resumes "
-        "for recruiters and Applicant Tracking Systems (ATS). "
-        "Your goal is to rewrite and enhance the provided resume text, keeping the factual meaning "
-        "but improving clarity, grammar, action verbs, and keyword usage. "
-        "Make it concise, powerful, and result-oriented. Use professional tone. "
-        "Do not repeat the same text. Only output the enhanced version."
+        "You are a senior resume writer with 10+ years of experience improving professional resumes "
+        "for recruiters and ATS systems. Rewrite the text to improve clarity, tone, and keyword optimization. "
+        "Keep all factual information but make it more concise and result-oriented."
     )
 
     user_prompt = f"""
     Original Resume Text:
     {resume_text}
 
-    Improve it for ATS optimization and impact using these job keywords:
-    {keywords}
-
-    Return only the enhanced resume text, without comments or explanations.
+    Please optimize for these keywords: {keywords}
+    Return only the improved resume text.
     """
 
     messages = [
@@ -144,15 +138,14 @@ def enhance_resume_text(resume_text: str, job_keywords: Optional[List[str]] = No
 
 
 # -------------------------
-# Smoke Test (CLI)
+# Smoke Test (Local Run)
 # -------------------------
-
 def smoke_test():
-    """Quick test to verify API integration."""
-    example_text = """Developed backend APIs and fixed bugs in production systems."""
+    """Quick verification of Azure GPT integration."""
+    example_text = "Developed backend APIs and fixed production issues in cloud systems."
     print("🔍 Testing Azure GPT Resume Enhancement...")
     try:
-        improved = enhance_resume_text(example_text, ["Python", "REST APIs", "Cloud"])
+        improved = enhance_resume_text(example_text, ["Python", "REST APIs", "Azure"])
         print("\nOriginal:", example_text)
         print("\nEnhanced:", improved)
     except Exception as e:

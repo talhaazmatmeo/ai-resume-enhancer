@@ -1,7 +1,18 @@
+# Core Framework
 streamlit>=1.25
+
+# PDF Handling
 pdfplumber
+reportlab
+jinja2
+requests
+
+# Document Parsing
 python-docx
 spacy
+
+# Resume Scoring / Matching
 rapidfuzz
-requests
-reportlab
+
+# Optional (useful for debugging / testing)
+pytest
