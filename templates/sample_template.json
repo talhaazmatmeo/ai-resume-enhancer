@@ -1,0 +1,84 @@
+{
+  "template_name": "Sample Modern One-Page Resume",
+  "description": "Elite adaptive layout modeled after Sohaib Adeel CV — fits any resume into one A4 page with professional spacing and color hierarchy.",
+  "version": "2.0",
+  "tags": ["modern", "adaptive", "one-page", "ats-optimized"],
+  "page": {
+    "size": "A4",
+    "orientation": "portrait",
+    "margins": { "top": 55, "left": 55, "right": 55, "bottom": 45 },
+    "font_family": "Helvetica",
+    "font_size": 11,
+    "line_height": 1.35,
+    "text_color": "#1A1A1A",
+    "header_color": "#0A66C2",
+    "accent_color": "#2E2E2E",
+    "divider_color": "#CCCCCC",
+    "background_color": "#FFFFFF"
+  },
+  "sections": [
+    {
+      "name": "Header",
+      "layout": "center",
+      "font_size": 18,
+      "font_weight": "bold",
+      "spacing_after": 10,
+      "elements": ["name", "contact", "linkedin"],
+      "divider": true
+    },
+    {
+      "name": "Profile",
+      "title": "Professional Profile",
+      "style": "header-blue",
+      "spacing_before": 10,
+      "spacing_after": 6
+    },
+    {
+      "name": "Education",
+      "title": "Education",
+      "style": "header-blue",
+      "spacing_before": 10,
+      "spacing_after": 6
+    },
+    {
+      "name": "Experience",
+      "title": "Professional Experience",
+      "style": "header-blue",
+      "spacing_before": 10,
+      "spacing_after": 6
+    },
+    {
+      "name": "Projects",
+      "title": "Projects",
+      "style": "header-blue",
+      "spacing_before": 10,
+      "spacing_after": 6
+    },
+    {
+      "name": "Skills",
+      "title": "Core Skills",
+      "layout": "multi-column",
+      "columns": 2,
+      "style": "header-blue",
+      "spacing_before": 10,
+      "spacing_after": 8
+    },
+    {
+      "name": "Footer",
+      "layout": "center",
+      "font_size": 9,
+      "text_color": "#777777",
+      "text": "Enhanced by AI Resume Enhancer © 2025",
+      "margin_top": 15
+    }
+  ],
+  "adaptive_rules": {
+    "max_page_count": 1,
+    "text_wrap": true,
+    "auto_scale_font": true,
+    "scale_min_font_size": 9,
+    "compress_spacing_if_overflow": true,
+    "truncate_if_overflow": true,
+    "graceful_fallback": "plain_text"
+  }
+}

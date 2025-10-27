@@ -2,80 +2,80 @@
 import io
 import os
 import sys
-from typing import List
+import json
+import streamlit as st
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-import streamlit as st
-
-import os
-
-AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT")
-AZURE_FOUNDRY_KEY = os.getenv("AZURE_FOUNDRY_KEY")
-AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
-PDFSHIFT_API_KEY = os.getenv("PDFSHIFT_API_KEY")
-
-
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Project modules
-from src import parser, extractor, ats_score, gpt_client
+from src import parser, ats_score, gpt_client
 from src.pdf_exporter import generate_resume_pdf
 
-# -------------------------------
-# Utility: Convert text → PDF bytes (fallback)
-# -------------------------------
+# Layout Engine imports
+from src.layout_engine.template_mapper import map_text_to_template
+from src.layout_engine.fallback_renderer import render_fallback_pdf
+
+# ---------------------------------
+# Environment variables (loaded via Streamlit Secrets)
+# ---------------------------------
+AZURE_FOUNDRY_ENDPOINT = os.getenv("AZURE_FOUNDRY_ENDPOINT")
+AZURE_FOUNDRY_KEY = os.getenv("AZURE_FOUNDRY_KEY")
+AZURE_DEPLOYMENT_NAME = os.getenv("AZURE_DEPLOYMENT_NAME")
+PDFSHIFT_API_KEY = os.getenv("PDFSHIFT_API_KEY")
+
+# ---------------------------------
+# Utility: simple text-to-PDF fallback
+# ---------------------------------
 def text_to_pdf_bytes(text: str) -> bytes:
     buffer = io.BytesIO()
     p = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-
     p.setFont("Helvetica", 11)
-    margin = 50
-    y = height - margin
+    width, height = letter
+    y = height - 50
 
     for line in text.splitlines():
         if y < 60:
             p.showPage()
             p.setFont("Helvetica", 11)
-            y = height - margin
-        p.drawString(margin, y, line[:110])
+            y = height - 50
+        p.drawString(50, y, line[:110])
         y -= 15
 
     p.save()
     buffer.seek(0)
     return buffer.read()
 
-
-# -------------------------------
+# ---------------------------------
 # Streamlit UI
-# -------------------------------
-st.set_page_config(page_title="AI Resume Enhancer", layout="centered")
-st.title("🚀 AI Resume Enhancer — Stage 2")
+# ---------------------------------
+st.set_page_config(page_title="AI Resume Enhancer – Adaptive Edition", layout="centered")
 
+st.title("🚀 AI Resume Enhancer — Adaptive Layout Edition")
 st.markdown("""
-**Transform your resume with AI — instantly.**
-Upload your resume (PDF/DOCX), paste a job description, and get:
+**Your resume, professionally enhanced — and formatted in your custom layout.**  
+Upload your resume (PDF/DOCX), optionally include a job description, and get:
 - ✅ Smart ATS score  
-- ✍️ AI-enhanced resume content  
-- 📄 Download as TXT or beautifully formatted PDF  
+- ✍️ AI-enhanced professional rewrite  
+- 🧠 Automatic layout matching  
+- 📄 One-page adaptive PDF download  
 """)
 
-# Sidebar
-st.sidebar.header("How to Use")
+# Sidebar instructions
+st.sidebar.header("⚙️ How to Use")
 st.sidebar.write("""
 1️⃣ Upload your resume (PDF/DOCX)  
-2️⃣ (Optional) Paste a job description  
-3️⃣ Parse → Score → Enhance  
-4️⃣ Download your improved resume
+2️⃣ (Optional) Paste job description  
+3️⃣ Parse → Enhance → Export (1-page formatted PDF)  
 """)
 
-# Upload UI
+# Upload section
 uploaded_file = st.file_uploader("📂 Upload Resume", type=["pdf", "docx"])
 jd_text = st.text_area("💼 Paste Job Description (optional)", height=160)
 
-# Session state
+# Session state init
 if "parsed" not in st.session_state:
     st.session_state.update({
         "parsed": None,
@@ -83,7 +83,7 @@ if "parsed" not in st.session_state:
         "enhanced_text": None
     })
 
-# Parse resume
+# Parse
 if uploaded_file and st.button("🔍 Parse Resume"):
     try:
         parsed = parser.parse_and_extract(uploaded_file)
@@ -92,21 +92,13 @@ if uploaded_file and st.button("🔍 Parse Resume"):
     except Exception as e:
         st.error(f"❌ Parsing failed: {e}")
 
-# Display parsed data
+# Display results
 if st.session_state["parsed"]:
     parsed = st.session_state["parsed"]
     st.subheader("📑 Resume Preview")
-    st.text_area("Extracted Text", parsed.get("text", "")[:1000], height=240)
+    st.text_area("Extracted Text (preview)", parsed.get("text", "")[:1000], height=240)
 
-    # Show skills
-    st.subheader("🧠 Extracted Skills")
-    skills = parsed.get("skills", [])[:40]
-    if skills:
-        st.write(", ".join(skills))
-    else:
-        st.write("No skills detected.")
-
-    # ATS score
+    # ATS scoring
     if st.button("📊 Compute ATS Score"):
         resume_text = parsed.get("text", "")
         score, details = ats_score.score_resume(resume_text, jd_text or "")
@@ -114,7 +106,7 @@ if st.session_state["parsed"]:
         st.metric("Estimated ATS Score", f"{score}%")
         st.json(details)
 
-    # Enhance Resume
+    # Enhancement
     if st.button("✨ Enhance Resume (Azure GPT)"):
         resume_text = parsed.get("text", "")
         job_keywords = ats_score.extract_job_keywords(jd_text or "", top_n=20)
@@ -126,40 +118,33 @@ if st.session_state["parsed"]:
         except Exception as e:
             st.error(f"❌ Enhancement failed: {e}")
 
-# Show before / after + download options
+# Show before/after + downloads
 if st.session_state.get("enhanced_text"):
     st.subheader("🔄 Before / After Comparison")
     col1, col2 = st.columns(2)
     col1.text_area("Original", st.session_state["parsed"].get("text", "")[:600], height=300)
     col2.text_area("Enhanced", st.session_state["enhanced_text"][:600], height=300)
 
-    # -------------------------
-    # Downloads
-    # -------------------------
     enhanced_text = st.session_state["enhanced_text"]
 
-    # TXT version
-    txt_data = enhanced_text.encode("utf-8")
-    st.download_button(
-        "⬇️ Download Enhanced (TXT)",
-        data=txt_data,
-        file_name="enhanced_resume.txt",
-        mime="text/plain"
-    )
-
-    # Styled PDF version
+    # Load layout template
     try:
-        pdf_data = generate_resume_pdf(enhanced_text)
-    except Exception:
-        pdf_data = text_to_pdf_bytes(enhanced_text)
+        with open("templates/sample_template.json", "r", encoding="utf-8") as f:
+            template = json.load(f)
+        pdf_data = map_text_to_template(enhanced_text, template)
+        st.success("🧠 Applied Adaptive Layout (One Page)")
+    except Exception as e:
+        st.warning(f"⚠️ Template layout failed, using fallback. ({e})")
+        try:
+            pdf_data = render_fallback_pdf(enhanced_text)
+        except Exception:
+            pdf_data = text_to_pdf_bytes(enhanced_text)
 
-    st.download_button(
-        "📄 Download Enhanced (PDF)",
-        data=pdf_data,
-        file_name="enhanced_resume.pdf",
-        mime="application/pdf"
-    )
+    # Download buttons
+    txt_data = enhanced_text.encode("utf-8")
+    st.download_button("⬇️ Download (TXT)", data=txt_data, file_name="enhanced_resume.txt", mime="text/plain")
+    st.download_button("📄 Download (One-Page PDF)", data=pdf_data, file_name="enhanced_resume.pdf", mime="application/pdf")
 
 # Footer
 st.markdown("---")
-st.caption("Built with ❤️ using Streamlit + Azure OpenAI. | Stage 2: AI Resume Enhancer MVP+")
+st.caption("Built with ❤️ by Talha Azmat using Streamlit + Azure OpenAI | Adaptive Resume Layout Engine v3.0")
